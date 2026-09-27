@@ -1,0 +1,9 @@
+NAME="NyxOS"
+VERSION="0.1.0 (Genesis)"
+ID=nyxos
+ID_LIKE=debian
+PRETTY_NAME="NyxOS 0.1.0"
+VERSION_ID="0.1.0"
+HOME_URL="https://github.com/Shahbazkhan13/nyx-os"
+SUPPORT_URL="https://github.com/Shahbazkhan13/nyx-os/issues"
+BUG_REPORT_URL="https://github.com/Shahbazkhan13/nyx-os/issues"
