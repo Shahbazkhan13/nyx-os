@@ -20,3 +20,5 @@ secrets/
 logs/
 tmp/
 temp/
+wget-log*
+build.log
