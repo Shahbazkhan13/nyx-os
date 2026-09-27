@@ -44,6 +44,9 @@ pre { background:#0d1117; padding:10px; border-radius:4px; overflow:auto; max-he
   <a href="/recon">Recon</a>
   <a href="/network">Network</a>
   <a href="/credentials">Credentials</a>
+  <a href="/wireless">Wireless</a>
+  <a href="/forensics">Forensics</a>
+  <a href="/redteam">Red Team</a>
   <a href="/reports">Reports</a>
 </div>
 <hr style="border-color:#30363d;">
@@ -153,6 +156,56 @@ def render_reports():
     """)
 
 
+
+
+def render_wireless():
+    db = _db()
+    cases = db.fetchall("SELECT id, name FROM cases ORDER BY id DESC")
+    opts = "".join(f'<option value="{c["id"]}">{c["id"]}: {c["name"]}</option>' for c in cases)
+    return HTML.replace("{content}", f"""
+    <div class="card">
+      <h2>Wireless Workbench</h2>
+      <form method="POST" action="/wireless-run">
+        <select name="case_id">{opts}</select>
+        <button class="btn" type="submit">Detect Interfaces</button>
+      </form>
+    </div>
+    """)
+
+
+def render_forensics():
+    db = _db()
+    cases = db.fetchall("SELECT id, name FROM cases ORDER BY id DESC")
+    opts = "".join(f'<option value="{c["id"]}">{c["id"]}: {c["name"]}</option>' for c in cases)
+    return HTML.replace("{content}", f"""
+    <div class="card">
+      <h2>Forensics Workbench</h2>
+      <form method="POST" action="/forensics-run">
+        <select name="case_id">{opts}</select>
+        <input name="path" placeholder="/path/to/file" required style="width:400px;">
+        <button class="btn" type="submit">Analyze</button>
+      </form>
+    </div>
+    """)
+
+
+def render_redteam():
+    db = _db()
+    cases = db.fetchall("SELECT id, name FROM cases ORDER BY id DESC")
+    opts = "".join(f'<option value="{c["id"]}">{c["id"]}: {c["name"]}</option>' for c in cases)
+    return HTML.replace("{content}", f"""
+    <div class="card">
+      <h2>Red Team Workbench</h2>
+      <p style="color:#f85149;">Authorized testing only.</p>
+      <form method="POST" action="/redteam-run">
+        <select name="case_id">{opts}</select>
+        <input type="hidden" name="authorized" value="yes">
+        <button class="btn" type="submit">Suggest Exploits</button>
+      </form>
+    </div>
+    """)
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, body, status=200, content_type="text/html"):
         self.send_response(status)
@@ -178,6 +231,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(render_network())
         if u.path == "/credentials":
             return self._send(render_credentials())
+        if u.path == "/wireless":
+            return self._send(render_wireless())
+        if u.path == "/forensics":
+            return self._send(render_forensics())
+        if u.path == "/redteam":
+            return self._send(render_redteam())
         if u.path == "/reports":
             return self._send(render_reports())
         if u.path == "/report-md":
@@ -218,6 +277,27 @@ class Handler(BaseHTTPRequestHandler):
             wb = CredentialsWorkbench(db, EventBus(db=db))
             res = wb.discover(data["hash"], {"case_id": int(data["case_id"])})
             body = f"<div class='card'><h2>Hash Analysis</h2><pre>{json.dumps(res.to_dict(), indent=2)}</pre><a href='/credentials'>back</a></div>"
+            return self._send(HTML.replace("{content}", body))
+        if self.path == "/wireless-run":
+            db = _db()
+            from security.wireless.wireless_workbench import WirelessWorkbench
+            wb = WirelessWorkbench(db, EventBus(db=db))
+            res = wb.discover(None, {"case_id": int(data["case_id"])})
+            body = f"<div class='card'><h2>Wireless</h2><pre>{json.dumps(res.to_dict(), indent=2)}</pre><a href='/wireless'>back</a></div>"
+            return self._send(HTML.replace("{content}", body))
+        if self.path == "/forensics-run":
+            db = _db()
+            from security.forensics.forensics_workbench import ForensicsWorkbench
+            wb = ForensicsWorkbench(db, EventBus(db=db))
+            res = wb.discover(data["path"], {"case_id": int(data["case_id"])})
+            body = f"<div class='card'><h2>Forensics</h2><pre>{json.dumps(res.to_dict(), indent=2)}</pre><a href='/forensics'>back</a></div>"
+            return self._send(HTML.replace("{content}", body))
+        if self.path == "/redteam-run":
+            db = _db()
+            from security.redteam.redteam_workbench import RedTeamWorkbench
+            wb = RedTeamWorkbench(db, EventBus(db=db))
+            res = wb.discover(None, {"case_id": int(data["case_id"]), "authorized": True})
+            body = f"<div class='card'><h2>Red Team Suggestions</h2><pre>{json.dumps(res.to_dict(), indent=2)}</pre><a href='/redteam'>back</a></div>"
             return self._send(HTML.replace("{content}", body))
         return self._send("Not found", status=404)
 
