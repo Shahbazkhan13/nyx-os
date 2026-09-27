@@ -1,7 +1,7 @@
-"""NyxOS Web Dashboard — auto-generates UI for all registered workbenches."""
-import os, sys, json, io, traceback
+"""NyxOS Web Dashboard v3 — full UI with all workbenches, timeline, PDF, AI."""
+import os, sys, json, traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlparse, parse_qs, urlencode
+from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -10,6 +10,9 @@ from core.database.db import Database
 from core.events.bus import EventBus
 from core.api.api import CoreAPI
 from reporting.reporter import Reporter
+from reporting.pdf_reporter import build_pdf_html
+from desktop.web.timeline import render_events
+from ai.assistant.assistant import Assistant
 from security.registry.all_workbenches import ALL, list_domains, get_workbench
 
 
@@ -22,16 +25,16 @@ def _db():
 
 STYLE = """
 body { font-family: 'Segoe UI', system-ui, sans-serif; background:#0d1117; color:#c9d1d9; margin:0; }
-header { background:#161b22; border-bottom:1px solid #30363d; padding:15px 30px; display:flex; align-items:center; gap:30px; }
+header { background:#161b22; border-bottom:1px solid #30363d; padding:15px 30px; display:flex; align-items:center; gap:30px; flex-wrap:wrap; }
 header h1 { color:#58a6ff; margin:0; font-size:22px; }
 nav a { color:#8b949e; margin-right:18px; text-decoration:none; font-size:14px; }
 nav a:hover, nav a.active { color:#58a6ff; }
 main { padding:25px 30px; max-width:1200px; }
 h2 { color:#58a6ff; border-bottom:1px solid #30363d; padding-bottom:8px; margin-top:0; }
+h3 { color:#79c0ff; }
 .card { background:#161b22; border:1px solid #30363d; padding:20px; margin:15px 0; border-radius:8px; }
-.btn { background:#238636; color:white; padding:8px 16px; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
+.btn { background:#238636; color:white; padding:8px 16px; border:none; border-radius:6px; cursor:pointer; font-size:14px; text-decoration:none; display:inline-block; }
 .btn:hover { background:#2ea043; }
-.btn-danger { background:#da3633; }
 input, select, textarea { background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:8px; border-radius:6px; font-size:14px; font-family:inherit; }
 input:focus, select:focus, textarea:focus { outline:none; border-color:#58a6ff; }
 table { width:100%; border-collapse:collapse; margin-top:10px; }
@@ -42,7 +45,7 @@ tr:hover { background:#1c2128; }
 .critical{background:#7d0c0c;color:#fff;} .high{background:#a33;color:#fff;}
 .medium{background:#a70;color:#fff;} .low{background:#365314;color:#fff;}
 .info{background:#1f4f8b;color:#fff;}
-pre { background:#0d1117; padding:15px; border-radius:6px; overflow:auto; max-height:500px; border:1px solid #30363d; font-size:13px; }
+pre { background:#0d1117; padding:15px; border-radius:6px; overflow:auto; max-height:500px; border:1px solid #30363d; font-size:13px; white-space:pre-wrap; word-break:break-word; }
 .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:15px; }
 .tile { background:#161b22; border:1px solid #30363d; padding:18px; border-radius:8px; text-decoration:none; color:#c9d1d9; transition:0.15s; }
 .tile:hover { border-color:#58a6ff; transform:translateY(-2px); }
@@ -61,6 +64,8 @@ def page(content, active=""):
         ("/workbenches", "Workbenches"),
         ("/findings", "Findings"),
         ("/assets", "Assets"),
+        ("/timeline", "Timeline"),
+        ("/ai", "AI"),
         ("/reports", "Reports"),
     ]
     nav = "".join(
@@ -79,8 +84,6 @@ def page(content, active=""):
 </body></html>"""
 
 
-# ---------------- Pages ----------------
-
 def render_home():
     db = _db()
     cases = db.fetchall("SELECT COUNT(*) AS n FROM cases")[0]["n"]
@@ -88,14 +91,12 @@ def render_home():
     findings = db.fetchall("SELECT COUNT(*) AS n FROM findings")[0]["n"]
     evidence = db.fetchall("SELECT COUNT(*) AS n FROM evidence")[0]["n"]
     events = db.fetchall("SELECT COUNT(*) AS n FROM events")[0]["n"]
-
     domains = list_domains()
     tiles = "".join(
         f'<a class="tile" href="/workbench/{d["name"]}">'
-        f'<h3>{d["name"]}</h3><p>{d["description"][:60]}</p></a>'
+        f'<h3>{d["name"]}</h3><p>{d["description"][:70]}</p></a>'
         for d in domains
     )
-
     return page(f"""
     <h2>Overview</h2>
     <div class="card">
@@ -107,7 +108,6 @@ def render_home():
         <div><div class="stat">{events}</div><div class="stat-label">Events</div></div>
       </div>
     </div>
-
     <h2>All Workbenches ({len(domains)})</h2>
     <div class="grid">{tiles}</div>
     """, active="/")
@@ -118,9 +118,9 @@ def render_cases():
     rows = db.fetchall("SELECT * FROM cases ORDER BY id DESC LIMIT 100")
     trs = "".join(
         f'<tr><td>{r["id"]}</td><td>{r["name"]}</td>'
-        f'<td>{r["status"]}</td><td>{r["created_at"][:19]}</td></tr>'
-        for r in rows
-    )
+        f'<td>{r["status"]}</td><td>{r["created_at"][:19]}</td>'
+        f'<td><a href="/report-html?case={r["id"]}" class="btn" style="padding:4px 10px;font-size:12px;">Report</a></td></tr>'
+        for r in rows)
     return page(f"""
     <h2>Cases</h2>
     <div class="card">
@@ -131,8 +131,8 @@ def render_cases():
     </div>
     <div class="card">
       <table>
-        <tr><th>ID</th><th>Name</th><th>Status</th><th>Created</th></tr>
-        {trs or '<tr><td colspan="4">No cases yet.</td></tr>'}
+        <tr><th>ID</th><th>Name</th><th>Status</th><th>Created</th><th>Action</th></tr>
+        {trs or '<tr><td colspan="5">No cases yet.</td></tr>'}
       </table>
     </div>
     """, active="/cases")
@@ -143,8 +143,7 @@ def render_workbenches():
     tiles = "".join(
         f'<a class="tile" href="/workbench/{d["name"]}">'
         f'<h3>{d["name"]}</h3><p>{d["domain"]}</p></a>'
-        for d in domains
-    )
+        for d in domains)
     return page(f"""
     <h2>Workbenches ({len(domains)} domains)</h2>
     <div class="grid">{tiles}</div>
@@ -161,30 +160,24 @@ def render_workbench(name):
     opts = "".join(f'<option value="{c["id"]}">{c["id"]}: {c["name"]}</option>'
                    for c in cases) or '<option value="">-- create a case first --</option>'
 
-    # Domain-specific form fields
-    extra = ""
+    placeholder = "target (IP, domain, URL, hash)"
     if name == "forensics":
-        extra = '<input name="target" placeholder="/path/to/file" required style="flex:1;">'
+        placeholder = "/path/to/file"
     elif name == "credentials":
-        extra = '<input name="target" placeholder="paste hash" required style="flex:1;">'
-    elif name == "redteam":
-        extra = '<input type="hidden" name="authorized" value="yes">'
-        extra += '<input name="target" placeholder="note (optional)" style="flex:1;">'
-    else:
-        extra = '<input name="target" placeholder="target (IP, domain, URL, hash)" required style="flex:1;">'
+        placeholder = "paste hash"
+    extra = f'<input name="target" placeholder="{placeholder}" required style="flex:1; min-width:300px;">'
+    if name == "redteam":
+        extra = ('<input type="hidden" name="authorized" value="yes">'
+                 '<input name="target" placeholder="note (optional)" style="flex:1;">')
 
-    # Recent findings for this workbench's domain
     findings_rows = db.fetchall(
         "SELECT id, title, severity, risk_score FROM findings "
-        "WHERE title LIKE ? OR details LIKE ? ORDER BY id DESC LIMIT 15",
-        (f"%{name}%", f"%{name}%"),
-    )
+        "WHERE title LIKE ? ORDER BY id DESC LIMIT 15",
+        (f"%{name}%",))
     trs = "".join(
         f'<tr><td>{r["id"]}</td><td>{r["title"]}</td>'
         f'<td><span class="badge {r["severity"]}">{r["severity"]}</span></td>'
-        f'<td>{r["risk_score"]}</td></tr>'
-        for r in findings_rows
-    )
+        f'<td>{r["risk_score"]}</td></tr>' for r in findings_rows)
 
     return page(f"""
     <h2>{name}</h2>
@@ -197,7 +190,7 @@ def render_workbench(name):
       </form>
     </div>
     <div class="card">
-      <h3 style="color:#8b949e; margin-top:0;">Recent Findings</h3>
+      <h3>Recent Findings</h3>
       <table>
         <tr><th>ID</th><th>Title</th><th>Severity</th><th>Risk</th></tr>
         {trs or '<tr><td colspan="4">No findings yet.</td></tr>'}
@@ -210,15 +203,12 @@ def render_findings():
     db = _db()
     rows = db.fetchall(
         "SELECT f.*, c.name AS case_name FROM findings f "
-        "LEFT JOIN cases c ON c.id=f.case_id ORDER BY f.risk_score DESC LIMIT 200"
-    )
+        "LEFT JOIN cases c ON c.id=f.case_id ORDER BY f.risk_score DESC LIMIT 200")
     trs = "".join(
         f'<tr><td>{r["id"]}</td><td>{r["case_name"] or "-"}</td>'
         f'<td>{r["title"]}</td>'
         f'<td><span class="badge {r["severity"]}">{r["severity"]}</span></td>'
-        f'<td>{r["risk_score"]}</td></tr>'
-        for r in rows
-    )
+        f'<td>{r["risk_score"]}</td></tr>' for r in rows)
     return page(f"""
     <h2>All Findings</h2>
     <div class="card">
@@ -234,13 +224,11 @@ def render_assets():
     db = _db()
     rows = db.fetchall(
         "SELECT a.*, c.name AS case_name FROM assets a "
-        "LEFT JOIN cases c ON c.id=a.case_id ORDER BY a.id DESC LIMIT 200"
-    )
+        "LEFT JOIN clients c ON c.id=a.case_id "
+        "LEFT JOIN cases c ON c.id=a.case_id ORDER BY a.id DESC LIMIT 200")
     trs = "".join(
         f'<tr><td>{r["id"]}</td><td>{r["case_name"] or "-"}</td>'
-        f'<td>{r["type"]}</td><td>{r["identifier"]}</td></tr>'
-        for r in rows
-    )
+        f'<td>{r["type"]}</td><td>{r["identifier"]}</td></tr>' for r in rows)
     return page(f"""
     <h2>All Assets</h2>
     <div class="card">
@@ -257,13 +245,13 @@ def render_reports():
     rows = db.fetchall("SELECT * FROM cases ORDER BY id DESC LIMIT 100")
     trs = "".join(
         f'<tr><td>{r["id"]}</td><td>{r["name"]}</td>'
-        f'<td><a href="/report-md?case={r["id"]}" style="color:#58a6ff;">markdown</a> | '
-        f'<a href="/report-json?case={r["id"]}" style="color:#58a6ff;">json</a> | '
-        f'<a href="/report-html?case={r["id"]}" style="color:#58a6ff;">html</a></td></tr>'
-        for r in rows
-    )
+        f'<td><a href="/report-html?case={r["id"]}" class="btn" style="padding:4px 10px;font-size:12px;">HTML/Print</a> '
+        f'<a href="/report-md?case={r["id"]}" style="color:#58a6ff;margin-left:10px;">md</a> '
+        f'<a href="/report-json?case={r["id"]}" style="color:#58a6ff;margin-left:10px;">json</a></td></tr>'
+        for r in rows)
     return page(f"""
     <h2>Reports</h2>
+    <p style="color:#8b949e;">Click "HTML/Print" to open a print-ready report. Use Ctrl+P → Save as PDF.</p>
     <div class="card">
       <table>
         <tr><th>ID</th><th>Case</th><th>Export</th></tr>
@@ -273,20 +261,55 @@ def render_reports():
     """, active="/reports")
 
 
+def render_ai_page():
+    return page("""
+    <h2>AI Assistant</h2>
+    <div class="card">
+      <form method="POST" action="/ai-ask" class="row">
+        <input name="q" placeholder="Ask about a tool, finding, or next step..." required style="flex:1; min-width:400px;">
+        <button class="btn" type="submit">Ask</button>
+      </form>
+      <p style="color:#8b949e;font-size:13px;margin-top:10px;">
+        Try: "nmap", "sqlmap", "next steps for recon", "explain output"
+      </p>
+    </div>
+    """, active="/ai")
+
+
+def render_ai_answer(q):
+    a = Assistant()
+    lq = q.lower()
+    if any(tool in lq for tool in ["nmap", "dig", "whois", "sqlmap", "hashcat", "nuclei"]):
+        tool = next(t for t in ["nmap", "dig", "whois", "sqlmap", "hashcat", "nuclei"] if t in lq)
+        r = a.explain_tool(tool)
+    elif "next" in lq:
+        r = a.suggest_next({"domain": "recon"})
+    else:
+        r = {"response": "Try asking about a specific tool (nmap, sqlmap, nuclei) or 'next steps'."}
+    return page(f"""
+    <h2>AI Assistant</h2>
+    <div class="card">
+      <p><b>Question:</b> {q}</p>
+      <h3>Answer</h3>
+      <pre>{json.dumps(r, indent=2, default=str)}</pre>
+      <a href="/ai" class="btn" style="margin-top:10px;">Ask Another</a>
+    </div>
+    """, active="/ai")
+
+
 def render_run_result(workbench_name, result_dict, error=None):
     if error:
         body = f'<div class="card"><h2 style="color:#da3633;">Error</h2><pre>{error}</pre></div>'
     else:
-        body = f'<div class="card"><h2>{workbench_name} — Result</h2><pre>{json.dumps(result_dict, indent=2, default=str)}</pre></div>'
-    body += f'<a href="/workbench/{workbench_name}" style="color:#58a6ff;">&larr; back to workbench</a>'
+        body = (f'<div class="card"><h2>{workbench_name} — Result</h2>'
+                f'<pre>{json.dumps(result_dict, indent=2, default=str)}</pre></div>')
+    body += f'<a href="/workbench/{workbench_name}" class="btn">&larr; Back</a>'
     return page(body, active="/workbenches")
 
 
-# ---------------- HTTP Handler ----------------
-
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
-        pass  # quiet
+        pass
 
     def _send(self, body, status=200, content_type="text/html; charset=utf-8"):
         if isinstance(body, str):
@@ -321,6 +344,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(render_findings())
             if p == "/assets":
                 return self._send(render_assets())
+            if p == "/timeline":
+                return self._send(page(render_events(_db()), active="/timeline"))
+            if p == "/ai":
+                return self._send(render_ai_page())
             if p == "/reports":
                 return self._send(render_reports())
             if p == "/report-md":
@@ -333,11 +360,10 @@ class Handler(BaseHTTPRequestHandler):
                                   content_type="application/json")
             if p == "/report-html":
                 cid = int(parse_qs(u.query).get("case", [1])[0])
-                md = Reporter(_db()).to_markdown(cid)
-                html = "<pre>" + md.replace("<", "&lt;") + "</pre>"
-                return self._send(page(f'<div class="card"><h2>Report #{cid}</h2>{html}</div>'))
+                html = build_pdf_html(_db(), cid)
+                return self._send(html)
             return self._send(page('<div class="card"><h2>Not found</h2></div>'), 404)
-        except Exception as e:
+        except Exception:
             tb = traceback.format_exc()
             return self._send(page(f'<div class="card"><h2>Server Error</h2><pre>{tb}</pre></div>'), 500)
 
@@ -350,7 +376,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Location", "/cases")
                 self.end_headers()
                 return
-
+            if self.path == "/ai-ask":
+                return self._send(render_ai_answer(data.get("q", "")))
             if self.path.startswith("/workbench-run/"):
                 name = self.path.split("/")[-1]
                 cls = get_workbench(name)
@@ -369,12 +396,11 @@ class Handler(BaseHTTPRequestHandler):
                     wb = cls(db, bus)
                     res = wb.discover(target, opts)
                     return self._send(render_run_result(name, res.to_dict()))
-                except Exception as e:
+                except Exception:
                     tb = traceback.format_exc()
                     return self._send(render_run_result(name, None, tb))
-
             return self._send("Not found", 404)
-        except Exception as e:
+        except Exception:
             tb = traceback.format_exc()
             return self._send(f"<pre>{tb}</pre>", 500)
 
