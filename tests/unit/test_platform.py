@@ -2,8 +2,8 @@
 import sys, os, json, tempfile, subprocess
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from platform.plugin_sdk.plugin import PluginLoader, PluginManifest
-from platform.workbench_sdk.workbench import Workbench, WorkbenchRegistry, WorkbenchResult
+from nx_platform.plugin_sdk.plugin import PluginLoader, PluginManifest
+from nx_platform.workbench_sdk.workbench import Workbench, WorkbenchRegistry, WorkbenchResult
 
 
 def test_plugin_manifest_validation():

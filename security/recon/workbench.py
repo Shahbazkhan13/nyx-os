@@ -1,6 +1,6 @@
 """NyxOS Recon Workbench - First Domain"""
 import subprocess, json, re
-from platform.workbench_sdk.workbench import Workbench
+from nx_nx_platform.workbench_sdk.workbench import Workbench
 
 class ReconWorkbench(Workbench):
     name = "recon"
