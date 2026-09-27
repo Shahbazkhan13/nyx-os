@@ -60,7 +60,7 @@ def render_home():
     cases = db.fetchall("SELECT COUNT(*) AS n FROM cases")[0]["n"]
     assets = db.fetchall("SELECT COUNT(*) AS n FROM assets")[0]["n"]
     findings = db.fetchall("SELECT COUNT(*) AS n FROM findings")[0]["n"]
-    return HTML.format(content=f"""
+    return HTML.replace("{content}", f"""
     <div class="card">
       <h2>Overview</h2>
       <p>Cases: <b>{cases}</b> &nbsp; Assets: <b>{assets}</b> &nbsp; Findings: <b>{findings}</b></p>
@@ -76,7 +76,7 @@ def render_cases():
     db = _db()
     rows = db.fetchall("SELECT * FROM cases ORDER BY id DESC LIMIT 50")
     trs = "".join(f"<tr><td>{r['id']}</td><td>{r['name']}</td><td>{r['status']}</td></tr>" for r in rows)
-    return HTML.format(content=f"""
+    return HTML.replace("{content}", f"""
     <div class="card">
       <h2>Cases</h2>
       <form method="POST" action="/case-create">
@@ -93,7 +93,7 @@ def render_recon():
     db = _db()
     cases = db.fetchall("SELECT id, name FROM cases ORDER BY id DESC")
     opts = "".join(f'<option value="{c["id"]}">{c["id"]}: {c["name"]}</option>' for c in cases)
-    return HTML.format(content=f"""
+    return HTML.replace("{content}", f"""
     <div class="card">
       <h2>Recon Workbench</h2>
       <form method="POST" action="/recon-run">
@@ -109,7 +109,7 @@ def render_network():
     db = _db()
     cases = db.fetchall("SELECT id, name FROM cases ORDER BY id DESC")
     opts = "".join(f'<option value="{c["id"]}">{c["id"]}: {c["name"]}</option>' for c in cases)
-    return HTML.format(content=f"""
+    return HTML.replace("{content}", f"""
     <div class="card">
       <h2>Network Workbench</h2>
       <form method="POST" action="/network-run">
@@ -125,7 +125,7 @@ def render_credentials():
     db = _db()
     cases = db.fetchall("SELECT id, name FROM cases ORDER BY id DESC")
     opts = "".join(f'<option value="{c["id"]}">{c["id"]}: {c["name"]}</option>' for c in cases)
-    return HTML.format(content=f"""
+    return HTML.replace("{content}", f"""
     <div class="card">
       <h2>Credentials Workbench</h2>
       <form method="POST" action="/credentials-run">
@@ -145,7 +145,7 @@ def render_reports():
         f'<td><a href="/report-md?case={r["id"]}">markdown</a> | '
         f'<a href="/report-json?case={r["id"]}">json</a></td></tr>'
         for r in rows)
-    return HTML.format(content=f"""
+    return HTML.replace("{content}", f"""
     <div class="card">
       <h2>Reports</h2>
       <table><tr><th>ID</th><th>Name</th><th>Export</th></tr>{trs}</table>
@@ -203,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = f"<div class='card'><h2>Recon: {data['target']}</h2><pre>{json.dumps(res.to_dict(), indent=2)}</pre><a href='/recon'>back</a></div>"
             except Exception as e:
                 body = f"<div class='card'><h2>Error</h2><pre>{e}</pre><a href='/recon'>back</a></div>"
-            return self._send(HTML.format(content=body))
+            return self._send(HTML.replace("{content}", body))
         if self.path == "/network-run":
             db = _db()
             wb = NetworkWorkbench(db, EventBus(db=db))
@@ -212,13 +212,13 @@ class Handler(BaseHTTPRequestHandler):
                 body = f"<div class='card'><h2>Network: {data['target']}</h2><pre>{json.dumps(res.to_dict(), indent=2)}</pre><a href='/network'>back</a></div>"
             except Exception as e:
                 body = f"<div class='card'><h2>Error</h2><pre>{e}</pre><a href='/network'>back</a></div>"
-            return self._send(HTML.format(content=body))
+            return self._send(HTML.replace("{content}", body))
         if self.path == "/credentials-run":
             db = _db()
             wb = CredentialsWorkbench(db, EventBus(db=db))
             res = wb.discover(data["hash"], {"case_id": int(data["case_id"])})
             body = f"<div class='card'><h2>Hash Analysis</h2><pre>{json.dumps(res.to_dict(), indent=2)}</pre><a href='/credentials'>back</a></div>"
-            return self._send(HTML.format(content=body))
+            return self._send(HTML.replace("{content}", body))
         return self._send("Not found", status=404)
 
 
